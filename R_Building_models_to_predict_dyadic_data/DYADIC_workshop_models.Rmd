@@ -1,0 +1,336 @@
+---
+title: "CONSTRUCTING AND EVALUATING DYADIC MODELS - Aura Raulo 2022"
+output: html_notebook
+---
+
+
+To predict pairwise values with other pairwise values you can take two routes: Null-model approach (matrix permutation models) or dyadic regression with multimembership random effect structure. The former is using the dependence structure of the data itself as a null model so you won't need to know much about it, just see whether the correlation between two matrices is more extreme than the distribution of correlation coefficients of the same two matrices when the other one is randomized multiple times and correlation re-calculated each time. The second is a generalized linear model approach, that aims at accounting for the specific type of dependence introduced by pairwise comparisons with multimembership random effect structure. This approach is more complicated but also more flexible in that it can accommodate a variety of different response variable types (proportions, counts etc...) with different distributions (skewed, normal), it can deal with interaction effects and repeated measurements of same individual (hierarchcal autocorrelation) alongside the dyadic dependence of the values (multimembership autocorrelation).
+
+As and example, we will use a real data set on wild wood mouse microbiome with known correlation patterns among dyadic variables. We have previously constructed the data in format of matrices and a long dyadic data frame. Now we will fit a few models with this data, to ask whether social association strength predicts microbiota sharing between any two mice, independent of their spatial distance, temporal distance and other similarity covariates. The results of this experiment are published in Raulo et al. 2021 https://www.nature.com/articles/s41396-021-00949-3
+
+All variables will be scaled between 0-1 for modeling to enhance comparability of effect estimates.
+
+This code will walk through the process in order or:
+
+1. Building a Bayesian generalized linear model with a multimembership random effect
+ - Constructing a dyadic model in brms
+ - Evaluating the brms model output
+ - Plotting model results
+ - Alternative: constructing a dyadic model in MCMCglmm
+ 
+2. Building a Multivariate Matrix Permutation Model (MRQAP)
+  - Constructing a matrix model in mrqap.dsp
+  - Understanding model output
+  - Plotting model results.
+
+Read in data in format of a dyadic data frame 
+and scale variables to enable comparison of estimates
+```{r}
+data.dyad<-readRDS("/Users/user/Dropbox/EXAMPLE_codes/DYADIC_workshops/DYADIC_workshop_AMRG_share/R_Making_dyadic_data/dyadic_model_data.rds")
+
+#Make sex combination into a factor 
+data.dyad$sex_combination<-factor(data.dyad$sex_combination, levels=c("MM","FM","FF"))
+
+#scale all predictors to range between 0-1 if they are not already naturally on that scale
+#define scaling function:
+range.use <- function(x,min.use,max.use){ (x - min(x,na.rm=T))/(max(x,na.rm=T)-min(x,na.rm=T)) * (max.use - min.use) + min.use }
+
+scalecols<-c("spatial_distance","Temporal_distance")
+
+for(i in 1:ncol(data.dyad[,which(colnames(data.dyad)%in%scalecols)])){
+  data.dyad[,which(colnames(data.dyad)%in%scalecols)][,i]<-range.use(data.dyad[,which(colnames(data.dyad)%in%scalecols)][,i],0,1)
+}
+```
+Preliminary plotting to get an idea of the data.
+Deciding the model family based on the properties of the response variable
+```{r}
+library(ggplot2)
+hist(data.dyad$Microbiome_similarity)
+# proportional values semi-normally distributed limited between 0 and 1 not including 1 and 0 --> best use betaregression, but gaussian would probably give similar estimates
+
+preplot1<-ggplot(data  = data.dyad,
+       aes(x = Microbiome_similarity,
+           y = Social_proximity))+
+  geom_point(size = 1.2,
+             alpha = .8,
+             position = "jitter")+
+    geom_smooth(method = lm,
+              se     = FALSE, 
+              col    = "red",
+              size   = .5, 
+              alpha  = .8)+
+  theme_bw()
+
+preplot1
+
+#No clear trends between variables of interest, neither is there visible overdispersion.
+#How about if we facet by sex_combination of each pair?
+
+preplot2<-ggplot(data  = data.dyad,
+       aes(x = Microbiome_similarity,
+           y = Social_proximity))+
+  geom_point(size = 1.2,
+             alpha = .5,
+             position = "jitter",
+             aes(fill=sex_combination))+
+      geom_smooth(method = lm,
+              se     = FALSE, 
+              size   = .8, 
+              aes(col=sex_combination))+
+  facet_wrap(~sex_combination)+
+  theme_bw()
+
+preplot2
+
+# More of an indication of a trend among pairs where males are involved...
+
+```
+Construct the model with brms package
+
+Let the intercept vary across a multimembership random effect of individual IDs in each pair
+```{r}
+library(brms)
+library(rstan)
+
+#Do not run!
+model1<-brm(Microbiome_similarity~1+age_similarity+ sex_combination+ spatial_distance+Temporal_distance+Social_proximity 
+                + (1|mm(IDA,IDB)),  
+              data = data.dyad, 
+              family= "Beta",
+              warmup = 1000, iter = 3000, 
+              cores = 2, chains = 2, 
+              inits=0)
+saveRDS(model1, "model1.rds")
+
+model1<-readRDS("model1.rds")
+
+summary(model1)
+
+#interaction model
+model2<-brm(Microbiome_similarity~1+age_similarity+ spatial_distance+Temporal_distance+sex_combination*Social_proximity 
+                + (1|ID) 
+              data = data.dyad, 
+              family= "Beta",
+              warmup = 1000, iter = 3000, 
+              cores = 2, chains = 2, 
+              inits=0)
+
+saveRDS(model2, "model2.rds")
+model2<-readRDS("model2.rds")
+
+summary(model2)
+
+```
+Alternatively, you can construct the BRMSmodel by letting the intercept AND the slope of the main predictor (here, Social proximity) vary across a multimembership random effect of individual IDs in each pair
+
+Random slope for main predictor can be informative but maybe also an overkill. Especially not good if using interaction effects, as random slopes across multimembership groups compete to some extent in explaining the variation otherwise accountable for categorical interaction effects.
+
+For example, the below model lets the intercept vary according to which samples or individuals comprise a pair but it also lets the effect of social proximity on micorbiome similarity vary according to which individuals are in a pair. In other words this is assuming that individuals vary in their tendency to spread or receive microbes socially, i.e. similar social contact homogenizes the microbiome of some individuals more than in others.
+```{r}
+
+model3<-brm(Microbiome_similarity~1+age_similarity+ sex_combination+ spatial_distance+Temporal_distance+Social_proximity 
+                + (1+ social_proximity|mm(IDA,IDB)),  
+              data = data.dyad, 
+              family= "Beta",
+              warmup = 1000, iter = 3000, 
+              cores = 2, chains = 2,
+              inits=0) 
+
+saveRDS(model3, "model3.rds")
+model3<-readRDS("model3.rds")
+
+summary(model3)
+```
+Model output and diagnostics
+```{r}
+# First plot model results:
+plot(model1)
+
+#Posterior predictive checks can be performed using pp_check function
+
+#Denisty overlay = # Compare distribution of response variable to distributions of a set of predicted response variable values based on model -- are they a good fit?
+pp1<-pp_check(model1)
+
+#Check here for how to further evaluate brms model after running: https://www.rensvandeschoot.com/tutorials/brms-started/
+#If the model has not converged (some Rhats are > 1.1). Do not analyse the results! Recommend running more iterations and/or setting more informative priors.
+#If model reports Bulk effective sample size too low for some predictors you can either not trust those estimates OR re-run with more samples or more chains.
+# If model reports many (more than, say, 10) "divergent transitions", you can increase the "adapt_delta" parameter in the model to for example 0.8. This makes the model more accurate but slower.
+```
+Plotting brms results
+
+LINEPLOTS
+```{r}
+library(ggplot2)
+library(bayesplot)
+library(bayestestR)
+library(brms)
+library(MCMCglmm)
+
+#A. Quick LINEPLOT for non-interaction models
+plot1<-mcmc_plot(model1, 
+         type = "intervals",
+         prob = 0.95,
+         pars= rownames(fixef(model1))[2:nrow(fixef(model1))])
+
+#B. More flexible LINEPLOT in ggplot:
+resdf1<-summary(model1)$fixed
+resdf1<-as.data.frame(resdf1)
+resdf1<-resdf1[c("Estimate","l-95% CI","u-95% CI")]
+resdf1<-resdf1[2:nrow(resdf1),]
+resdf1$Predictor<-rownames(resdf1)
+colnames(resdf1)<-c("Estimate","lCI","uCI","Predictor")
+resdf1$Predictor<-factor(resdf1$Predictor, levels=c("Social_proximity", "Temporal_distance", "spatial_distance",  "sex_combinationFF", "sex_combinationFM",
+"age_similarity"))
+
+ticks<-rev(resdf1$Predictor)
+
+plot2<-ggplot(resdf1,aes(x=Estimate,y=Predictor,colour=Predictor))+
+  geom_linerange(aes(xmin = lCI, xmax = uCI),size=2.5)+
+  geom_point(size=4,colour="black", shape=21, fill="white")+
+  theme_bw()+
+  theme(legend.position='none',text = element_text(size=22))+
+  scale_y_discrete(labels= ticks)+
+  labs(x="Effect on Microbiota",y="")+
+  geom_vline(xintercept=0, linetype="dashed")
+
+#C. LINEPLOT with independent lines for interaction effects
+#Lets remember how to interpret interaction effects
+summary(model2)
+
+posterior_MM_baseline<-posterior_samples(model2, pars = "b_Social_proximity") 
+mean_MM <- mean(posterior_MM_baseline[,1])
+ci_MM <- ci(posterior_MM_baseline,method = "HDI")
+
+posterior_FM<-posterior_MM_baseline+posterior_samples(model2, pars = "b_sex_combinationFM:Social_proximity")
+mean_FM <- mean(posterior_FM[,1])
+ci_FM <- ci(posterior_FM,method = "HDI")
+
+posterior_FF<-posterior_MM_baseline+posterior_samples(model2, pars = "b_sex_combinationFF:Social_proximity")
+mean_FF <- mean(posterior_FF[,1])
+ci_FF <- ci(posterior_FF,method = "HDI")
+
+resdf2<-data.frame(Predictor=c("FF_Social_association","FM_Social_association","MM_Social_association"), Estimate=c(mean_FF, mean_FM, mean_MM), lCI=c(ci_FF$CI_low,ci_FM$CI_low,ci_MM$CI_low),uCI=c(ci_FF$CI_high,ci_FM$CI_high,ci_MM$CI_high))
+
+plot3<-ggplot(resdf2,aes(x=Estimate,y=Predictor,colour=Predictor))+
+  geom_linerange(aes(xmin = lCI, xmax = uCI),size=2.5)+
+  geom_point(size=4,colour="black", shape=21, fill="white")+
+  theme_bw()+
+  theme(legend.position='none',text = element_text(size=18))+
+  labs(x="Effect on Microbiota",y="")+
+  geom_vline(xintercept=0, linetype="dashed")+
+  scale_colour_manual(values=c("red","purple","blue"))
+```
+Plotting brms results
+
+Plots of predicted response variable values
+
+predicting values of microbiome similarity across dyads with different levels of social association.
+Lets make new data, containing only male-male pairs, and artificial social association values and use our model to predict the corresponding microbiome similarity values. All other variables are set to their mean for ease. For clarity, let's use only dyads with social associations larger than zero.
+
+We can then combine this data with the real data on dyads with zero social association to get an idea of what is the baseline microbiome similarity expected with no social contact.
+```{r}
+
+newdata<-data.dyad[which(data.dyad$Social_proximity>0),]
+newdata$sex_combination<-"FF"
+newdata$age_similarity<-1
+newdata$spatial_distance<-mean(newdata$spatial_distance)
+newdata$Temporal_distance<-mean(newdata$Temporal_distance)
+newdata$Social_proximity<-seq(from = 0, to = 1, by = 1/(nrow(newdata)-1)) #block distribution
+
+ppnew <- predict(model1, newdata=newdata)
+ppnew<-as.data.frame(ppnew)
+
+#plot weighted network association effect 0-1 on jaccard distribution
+
+newdata$Microbiome_similarity_predicted<-ppnew$Estimate
+newdata$data_type<-"simulated"
+
+#Combine simulated data with real data on dyads with zero social association
+never_together<-data.dyad[which(data.dyad$Social_proximity==0),]
+never_together$data_type<-"real"
+never_together$Microbiome_similarity_predicted<-NA
+
+newdata0<-rbind(never_together, newdata)
+
+#bracket social associations into three broad categories: never, sometimes and often observed together
+newdata0$relationship<-"Observed associated 1-50% of time\n(0 < SRI > 0.5)"
+newdata0[which(newdata0$Social_proximity>0.5),]$relationship<-"Observed associated over 50% of time\n(SRI > 0.5)"
+
+newdata0[which(newdata0$data_type=="real"),]$relationship<-"Never observed associated\n(SRI = 0)"
+newdata0[which(newdata0$data_type=="real"),]$Microbiome_similarity_predicted<-newdata0[which(newdata0$data_type=="real"),]$Microbiome_similarity
+
+newdata0$relationship<-factor(newdata0$relationship, levels=c("Never observed associated\n(SRI = 0)","Observed associated 1-50% of time\n(0 < SRI > 0.5)", "Observed associated over 50% of time\n(SRI > 0.5)"))
+
+plot4<-ggplot(newdata0, aes(x=Microbiome_similarity_predicted, fill=relationship))+
+  geom_density(alpha=0.5)+
+  theme_bw()+
+  scale_fill_manual(values=c("yellow4","lightgreen", "turquoise4"))+
+  theme(text=element_text(size=20))+
+  labs(x="")
+
+```
+Alternative: Construct the model with MCMCglmm package (limitations with response distribution, but quicker)
+```{r}
+library(MCMCglmm)
+
+#intercept model
+model4<-MCMCglmm(Microbiome_similarity~1+age_similarity+ sex_combination+ spatial_distance+Temporal_distance+Social_proximity, 
+             data=data.dyad,
+             family= "gaussian",
+             random =~ mm(IDA+IDB), 
+             verbose=FALSE)
+
+summary(model4)
+
+plot(model4)
+
+#interaction model
+model5<-MCMCglmm(Microbiome_similarity~1+age_similarity+ spatial_distance+Temporal_distance+sex_combination*Social_proximity, 
+             data=data.dyad,
+             family= "gaussian",
+             random =~ mm(IDA+IDB), 
+             verbose=FALSE)
+summary(model5)
+
+```
+2. Constructing an MRQAP matrix model
+
+This is a matrix permutation model that randomizes the residuals from the regression on each predictor 1000 times and compares the observed correlation coefficients to correlation coefficients resulting from these null models. See Dekker et al (2007) and asnipe package vignette by Damien Farine.
+
+Read in data in matrix format
+and scale variables to enable comparison of estimates
+```{r}
+library(asnipe)
+path<-"Making_dyadic_data/ready_matrices/"
+list.files(path)
+
+JACM<-readRDS(paste0(path,"JACM.rds"))
+AGEM<-readRDS(paste0(path,"AGEM.rds"))
+SEXM<-readRDS(paste0(path,"SEXM.rds"))
+SPATM<-readRDS(paste0(path,"SPATM.rds"))
+TEMPM<-readRDS(paste0(path,"TEMPM.rds"))
+AM<-readRDS(paste0(path,"AM.rds"))
+
+
+#Scale values in all matrices between 0-1, unless they are already naturally between are
+range.use <- function(x,min.use,max.use){ (x - min(x,na.rm=T))/(max(x,na.rm=T)-min(x,na.rm=T)) * (max.use - min.use) + min.use }
+
+SPATM_scaled<-range.use(SPATM,0,1)
+TEMPM_scaled<-range.use(TEMPM,0,1)
+
+#Now, MRQAP cannot deal with categorical variables, so w have to simplify our sex combination variable to binary sex-similarity. This is a needlessly complicated way:
+
+SEXM<-gsub("FF",1,SEXM)
+SEXM<-gsub("FM",0,SEXM)
+SEXM<-gsub("MM",1,SEXM)
+SEXM <- mapply(SEXM, FUN=as.numeric)
+SEXM <- matrix(data=SEXM, ncol=70, nrow=70)
+rownames(SEXM)<-rownames(AM)
+colnames(SEXM)<-colnames(AM)
+
+#Construct the model
+
+model6<- mrqap.dsp(JACM~ AGEM+SEXM+SPATM_scaled+TEMPM_scaled+AM , directed="undirected", diagonal=FALSE, randomisations=1000)
+
+model6
+
