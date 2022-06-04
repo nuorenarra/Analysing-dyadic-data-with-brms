@@ -2,7 +2,7 @@
 Bayesian multimembership glm framework for modeling pairwise (dyadic) values
 (c) Aura Raulo 2022
 
-##### In short #####
+#In short
 
 In biology and social sciences, many measures/variables of interest are inherently on the scale of pairs of individuals/samples, such as genetic distance, social association (e.g. Simple ratio Index), spatial or temporal distance (e.g. distance in meters of hours) or overlap (e.g home range overlap, life span overlap), or similarity in some proportional (e.g. microbiome dissimilarity) or categorical attribute (e.g. similarity in sex). Pairwise measurements often contain more informative variation than individual/sample -level summary measurements (e.g. categorical "genotype" rather than genetic distance, or "site" rathe than spatial distance) making them a good way to increase powere of statistical inference, but these values are not statistically speaking independent values, so they cannot be modelled as such.
  
@@ -47,23 +47,39 @@ This simple trick informs the model not only of the fact that some values have t
 As a final note, let it be said that these methods have been developed to account for the autocorrelation inherent for any type of pairwise comparison. However, just like many other metrics, different types of pairwise values have different features that come with varying autocorrelation structures. One simple example considers different types of distances: measures of Euclidean distances, such as real metric distance, are dependent on each other in a slightly different way than non-Euclidean distances. For instance, if you are standing on a two-dimensional space of Euclidean distance (e.g. football field), moving towards any point will affect your distance to all other points on the plain. But were you to stand on a field of non-Euclidean distances, e.g. a space describing similarity between ecological communities, you can become more similar to one other community while staying just as similar to another. Thus, in some ways, non-Euclidean distances are more independent of each other than Euclidean distances are. To date, I am not aware of any statistical methods differentiating between the autocorrelation structures of different types of distance values and future research is needed to assess how important these differences may be for dyadic modelling
 
 
-References
+## References
 Amato, K. R., van Belle, S., di Fiore, A., Estrada, A., Stumpf, R., White, B., Nelson, K. E., Knight, R., & Leigh, S. R. (2017). Patterns in Gut Microbiota Similarity Associated with Degree of Sociality among Sex Classes of a Neotropical Primate. Microbial Ecology, 74(1), 250–258. https://doi.org/10.1007/s00248-017-0938-6
+
 Anderson, M. J. (2017). Permutational Multivariate Analysis of Variance ( <scp>PERMANOVA</scp> ). In Wiley StatsRef: Statistics Reference Online (pp. 1–15). Wiley. https://doi.org/10.1002/9781118445112.stat07841
+
 Blyton, M. D. J., Banks, S. C., Peakall, R., Lindenmayer, D. B., & Gordon, D. M. (2014). Not all types of host contacts are equal when it comes to E. coli transmission. Ecology Letters, 17(8), 970–978. https://doi.org/10.1111/ele.12300
+
 Browne, W. J., Goldstein, H., & Rasbash, J. (2001). Multiple membership multiple classification (MMMC) models. Statistical Modelling, 1(2), 103–124. https://doi.org/10.1177/1471082X0100100202
+
 Carter, G., Farine, D., Crisp, R., Vrtilek, J., Ripperger, S., & Page, R. (2019). Development of new food-sharing relationships among nonkin vampire bats. BioRxiv, 534321. https://doi.org/10.1101/534321
+
 Cvetojevic, S., & Hochmair, H. H. (2021). Modeling interurban mentioning relationships in the U.S. Twitter network using geo-hashtags. Computers, Environment and Urban Systems, 87, 101621. https://doi.org/10.1016/j.compenvurbsys.2021.101621
+
 Dekker, D., Krackhardt, D., Psychometrika, T. S.-, & 2007, undefined. (n.d.). Sensitivity of MRQAP tests to collinearity and autocorrelation conditions. Springer. Retrieved July 30, 2020, from https://link.springer.com/content/pdf/10.1007/s11336-007-9016-1.pdf
+
 F. Dormann, C., M. McPherson, J., B. Araújo, M., Bivand, R., Bolliger, J., Carl, G., G. Davies, R., Hirzel, A., Jetz, W., Daniel Kissling, W., Kühn, I., Ohlemüller, R., R. Peres-Neto, P., Reineking, B., Schröder, B., M. Schurr, F., & Wilson, R. (2007). Methods to account for spatial autocorrelation in the analysis of species distributional data: a review. Ecography, 30(5), 609–628. https://doi.org/10.1111/j.2007.0906-7590.05171.x
+
 Fountain-Jones, N. M., Clark, N., Kinsley, A., Carstensen, M., Forrester, J., Johnson, T. J., Miller, E., Moore, S., Wolf, T., & Craft, M. (2019). Microbial associations and spatial proximity predict North American moose (Alces alces) gastrointestinal community composition. BioRxiv, 514604. https://doi.org/10.1101/514604
+
 Fountain‐Jones, N. M., Packer, C., Troyer, J. L., VanderWaal, K., Robinson, S., Jacquot, M., & Craft, M. E. (2017). Linking social and spatial networks to viral community phylogenetics reveals subtype‐specific transmission dynamics in African lions. Journal of Animal Ecology, 86(6), 1469–1482. https://doi.org/10.1111/1365-2656.12751
+
 Gayawan, E., Adegboye, O. A., James, A., Adegboye, A. M., & Elfaki, F. (2020). Bayesian spatial modelling of outbreaks of Ebola in Democratic Republic of Congo through the INLA-SPDE approach. MedRxiv, 2020.04.13.20063081. https://doi.org/10.1101/2020.04.13.20063081
+
 Holvoet, N., Dewachter, S., & Molenaers, N. (2016). Look Who’s Talking. Explaining Water-Related Information Sharing and Demand for Action Among Ugandan Villagers. Environmental Management, 58(5), 780–796. https://doi.org/10.1007/s00267-016-0760-9
+
 Koster, J. (2011). Interhousehold Meat Sharing among Mayangna and Miskito Horticulturalists in Nicaragua. Human Nature, 22(4), 394–415. https://doi.org/10.1007/s12110-011-9126-4
+
 Kruuk, L. E. B. (2004). Estimating genetic parameters in natural populations using the “animal model.” In Philosophical Transactions of the Royal Society B: Biological Sciences (Vol. 359, Issue 1446, pp. 873–890). Royal Society. https://doi.org/10.1098/rstb.2003.1437
+
 Springer, A., Mellmann, A., Fichtel, C., & Kappeler, P. M. (2016). Social structure and Escherichia coli sharing in a group-living wild primate, Verreaux’s sifaka. BMC Ecology, 16(1), 6. https://doi.org/10.1186/s12898-016-0059-y
+
 Thomson, C. E., Winney, I. S., Salles, O. C., & Pujol, B. (2018). A guide to using a Multiple-Matrix animal model to disentangle genetic and nongenetic causes of phenotypic variance. PLoS ONE, 13(10), e0197720. https://doi.org/10.1371/journal.pone.0197720
+
 VanderWaal, K. L., Atwill, E. R., Isbell, Lynne. A., & McCowan, B. (2014). Linking social and pathogen transmission networks using microbial genetics in giraffe ( Giraffa camelopardalis ). Journal of Animal Ecology, 83(2), 406–414. https://doi.org/10.1111/1365-2656.12137
  
 
