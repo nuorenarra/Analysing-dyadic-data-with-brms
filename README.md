@@ -2,7 +2,7 @@
 Bayesian multimembership glm framework for modeling pairwise (dyadic) values
 (c) Aura Raulo 2022
 
-#In short
+# In short
 
 In biology and social sciences, many measures/variables of interest are inherently on the scale of pairs of individuals/samples, such as genetic distance, social association (e.g. Simple ratio Index), spatial or temporal distance (e.g. distance in meters of hours) or overlap (e.g home range overlap, life span overlap), or similarity in some proportional (e.g. microbiome dissimilarity) or categorical attribute (e.g. similarity in sex). Pairwise measurements often contain more informative variation than individual/sample -level summary measurements (e.g. categorical "genotype" rather than genetic distance, or "site" rathe than spatial distance) making them a good way to increase powere of statistical inference, but these values are not statistically speaking independent values, so they cannot be modelled as such.
  
@@ -19,7 +19,7 @@ The three codes walk you through the steps of
 
 
 
-##### General introduction to statistical modeling of dyadic values #####
+# General introduction to statistical modeling of dyadic values
 
 A central assumption of statistical modeling is that datapoints are independent. This means that the value of one observation is not influenced by the value of another observation. Failing to account for non-independence can result in pseudoreplication, which increases the rate of false positive results in statistical analyses (Hurlbert 1984). In natural systems, however, measurements are rarely truly independent and in fact a lot of the important variation is tied to the very connections and interactions between things. Consequently, a range of methods have been developed to account for non-independence of response values. A common example is the use of random factors used in multivariate models, to account for nested similarity structures in the data, such as repeated measurements from the same sites. Here, “dependence” between measurements means that we would expect them to be inherently more similar within sites than between sites, and by taking this into account, we can assess other important drivers of this variation. But if this site-similarity is due to geographic patterns in the values, then perhaps sites closer to each other might also be more similar to one another than sites further apart? Sometimes forcing values into categories (e.g. “site”) is suboptimal compared to modeling their interdependence on a more continuous scale (e.g. “distance between sites”). Furthermore, not all dependencies present in biological data can be simplified by forcing their variation into separate categories in the first place. For example, genetic relationships, social associations or ecological community composition are difficult to represent as discrete groups, as their variation is inherently continuous, and can be fully revealed only by considering pairwise comparisons (e.g. genetic distance, social association strength, community similarity).
 
