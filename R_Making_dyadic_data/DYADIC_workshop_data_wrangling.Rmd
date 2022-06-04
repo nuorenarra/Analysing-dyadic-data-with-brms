@@ -1,0 +1,313 @@
+---
+title: "MAKING DYADIC DATA FROM INDEPENDENT OBSERVATIONS - Aura Raulo 2022"
+output: html_notebook
+---
+
+To predict dyadic (pairwise) values with other pairwise values you can take for example two routes: Null-model approach (matrix permutation models) or dyadic regression with multimembership random effect structure. The former is using the dependence structure of the data itself as a null model so you won't need to know much about it, just see whether the correlation between two matrices is more extreme than the distribution of correlation coefficients of the same two matrices when the other one is randomized multiple times and correlation re-calculated each time. The second is a generalized linear model approach, that aims at accounting for the specific type of dependence introduced by pairwise comparisons with multimembership random effect structure. This approach is more complicated but also more flexible in that it can accommodate a variety of different response variable types (proportions, counts etc...) with different distributions (skewed, normal), it can deal with interaction effects and repeated measurements of same individual (nested/hierarchical autocorrelation) alongside the dyadic dependence of the values (multimembership autocorrelation).
+
+-----------------------------------------------------------------------------
+As and example, we will use a real data set on wild mouse microbiome with known correlation patterns among dyadic variables.  We will construct a social network based on spatio-temporal co-occurrence (how often two individuals are observed in the same place within a short time window) and ask whether social network association strength predicts microbiota sharing between two mice, independent of their spatial distance, temporal distance and other categorical similarity covariates (e.g. whether individuals are of the same or different age and sex).
+
+Here, the variables we need for the model are:
+- Microbiota sharing/similarity  (Jaccard index of similarity = proportion of shared microbial taxa of all taxa of a pair), based on based on "microbiome data"
+- Social association strength: Proximity (edge weight) of a pair in the social network, constructed from tracking data (="loggerdata")
+- Spatial distance (meters between location centroids of individual mice, based on tracking data (="loggerdata")
+- Temporal distance (days between collection between any two microbiome samples), based on "microbiome metadata"
+- Age similarity (binary= same or different), based on "microbiome metadata"
+- Sex combination (3-way factor: Female-Female, Female-Male, Male-Male), based on "microbiome metadata"
+
+This code will walk through the process of making the dyadic (pairwise) model data from a real-life data set. We will make the data in format of individual-by-individual matrices (input data for MRQAP models) and then unravel them to long dyadic data frames where each row is one unique pair (input data for multimembership-glmms). 
+
+We will start by making 5 types of pairwise matrices describing 5 different types of dyadic variables between the same set of individuals:
+
+1. continuous proportional similarity matrix (here, microbiome Jaccard similarity matrix)
+2. continuous Euclidean distance matrices (here, spatial distance matrix and temporal distance matrix)
+3. continuous association matrix (here, social network based on spatiotemporal co-occurrence)
+4. binary similarity matrix (here, age similarity)
+5. Combination-factor matrix (here, sex combination of a pair)
+
+We will then unravel these matrices to create a long dyadic data frame
+-----------------------------------------------------------------------------
+1. Making microbiome similarity matrices to describe microbial taxa sharing (here,Jaccard similarity):
+```{r}
+#if (!require("BiocManager", quietly = TRUE))
+#    install.packages("BiocManager")
+#BiocManager::install("phyloseq")
+
+library(phyloseq)
+
+#Read in microbiome data and associated sample data in phyloseq format. These data sets contain either 70 samples of 70 individuals
+micdata<-readRDS( "Mouse_microbiome_idwise.rds")
+
+#See:
+micdata
+#This is a phyloseq object, consisting of a table of abundances of each micribial taxon per each sample (otu_table), a table of the taxonomy of each othese taxa (tax_table) and a metadata table containing additional information of each microbiome sample (sample_data). Sample_data contains information such as which individuals they came from, what sex or age these individuals were and when the sample was collected:
+sample_data<-sample_data(micdata)
+sample_data[,c("ID","Sample_name","Sex","Age", "date")]
+
+saveRDS(sample_data,"sample_data_from_phyloseq.rds")
+sample_data<-readRDS("sample_data_from_phyloseq.rds")
+
+#make a key for the order of sample names and their associated individual IDs.
+key<-data.frame(ID=sample_data(micdata)$ID, Sample_name=sample_data(micdata)$Sample_name)
+
+#Make Jaccard dissimilarity matrix from microbiome data using vegdist function embedded in phyloseq::distance
+JACM<- as.matrix(phyloseq::distance(micdata, method = "jaccard", type = "samples"))
+#Transpose Jaccard dissimilarity marix to Jaccard similarity matrix
+JACM<-1-JACM
+
+#see vegan::distance()
+
+#Note that Jaccard similarity matrix has rownames and colnames in the same order as key
+all(rownames(JACM)==key$Sample_name)
+# So we can just call the rownames and colnames with the names of individuals since there is just one sample per individual in this data set
+rownames(JACM)<-key$ID
+colnames(JACM)<-key$ID
+
+#Eyeball Jaccard similarities across individuals
+JACM
+
+#Save matrix to ready matrices folder
+saveRDS(JACM,"ready_matrices/JACM.rds")
+```
+2. Making continuous spatial and temporal distance matrices.
+
+2A) Temporal distance matrix 
+this matrix will describe the distance in days between microbiome samples based on the sample collection dates recorded in sample_data (microbiome metadata)
+```{r}
+#Transform dates into a numeric variable
+sample_data$date<-as.Date(as.character(sample_data$date), format="%d/%m/%Y")
+sample_data$date_numeric<-as.numeric(sample_data$date)
+
+#Create data frame with each sample name (character) and sampling time (numeric) 
+SampleTime_frame<-sample_data[,c("Sample_name","date_numeric")]
+SampleTime_frame$Sample_name<-as.character(SampleTime_frame$Sample_name)
+
+#Create an empty matrix to fill with distances
+TEMPM<-array(0,c(nrow(SampleTime_frame),nrow(SampleTime_frame)))
+
+#Derive matrix with time distances between each sample using abs()-function
+for (i in 1:nrow(SampleTime_frame)){
+ for (j in 1:nrow(SampleTime_frame)) 
+{TEMPM[i,j]=abs(SampleTime_frame$date_numeric[i] -SampleTime_frame$date_numeric[j])
+  }
+}
+
+#Note that Temporal distance matrix has rownames and colnames in the same order as key
+#all(rownames(TEMPM)==key$Sample_name)
+# So we can just call the rownames and colnames with the names of individuals since there is just one sample per individual in this data set
+
+#Name rown amd colnames with individual names 
+rownames(TEMPM)<-key$ID
+colnames(TEMPM)<-key$ID
+
+#Save matrix to ready matrices folder
+saveRDS(TEMPM,"ready_matrices/TEMPM.rds")
+```
+2B) Spatial distance matrix 
+this matrix will describe the distance in meters between the location centroid of each individual mouse, based on loggerdata
+
+Loggerdata is a separate data set where each row is a time-stamped observation of an individual mouse (ID) in a specific location (described with coordinates x and y). This data can be used to derive social networks as well as spatial centroid matrices of mice.
+
+(Note that centroid distance is not the most rigorous measure of spatial differeneces between individuals, as it is very sensitive to varying amounts of observations across individuals. Better would be for example to derive home range estimates for each individual (using kernel utilization density perhaps) and calculate overlap of home ranges between each pair. But this is a more complicated and data hungry method and beyond our scope here. We will keep it simple here and only measure distance between each mouse's mean location on a map. )
+```{r}
+Loggerdata<- readRDS("Loggerdata_simple.rds")
+Loggerdata_reduced<-Loggerdata[,c("ID","X_coord","Y_coord","logger")]
+head(Loggerdata_reduced)
+
+#Find mean location coordinates (centroid of logger records) for each individual
+centroids<-aggregate(Loggerdata_reduced[,2:3], by=list(Loggerdata_reduced$ID),FUN=mean,na.rm=TRUE)
+colnames(centroids)<-c("ID","X_coord_mean","Y_coord_mean")
+head(centroids)
+
+#Create an empty matrix to fill with distances
+SPATM<-array(NA,c(length(centroids$ID),length(centroids$ID)))
+
+#Derive matrix with spatial distances between each location centroid using basic trigonometry
+for (i in 1:length(centroids$ID)){
+ for (j in 1:length(centroids$ID)) 
+{SPATM[i,j]= sqrt((abs(centroids$X_coord_mean[i]-centroids$X_coord_mean[j]))^2+(abs(centroids$Y_coord_mean[i]-centroids$Y_coord_mean[j]))^2)
+  }
+}
+
+#Note that Association matrix has rownames and colnames in the same order as key
+all(rownames(SPATM)==key$ID)
+
+rownames(SPATM)<-key$ID
+colnames(SPATM)<-key$ID
+
+#Save matrix to ready matrices folder
+saveRDS(SPATM,"ready_matrices/SPATM.rds")
+```
+3. Making a social network based on spatiotemporal co-occurrence in the loggerdata using standard functions of the R package asnipe.
+
+This uses the night-location combination as the spatio-temporal grouping (individuals observed more often in the same location during same night are considered more "associated") 
+and calculates social association through "Simple Ratio Index" (SRI) as follows:
+
+SRI= X/X+ya+yb+yab,
+
+where X is the number of instances (nights) where individual a and b were observed "associated" (=in the same location during that night), ya is the number of instances where individual a was observed but b was not, yb is the number of instances where individual b was observed but a was not and yab is the number of instances where individuals a and b were both observed but not associated (not observed in the same location that night).
+
+This is probably the simplest and crudest form of proportional social association measure, and there are also much more nuanced ones. 
+
+We will use functions from the asnipe package to create a group-by-individual matrix from the logger data and to derive the association matrix from group-by-individual matrix.
+```{r}
+library(asnipe)
+# Make a spatio-temporal grouping variable by combining spatial and temporal variables "logger" (=unique location) and "night" (=unique time).
+Loggerdata$night_logger<-paste(Loggerdata$night, Loggerdata$logger, sep="-")
+
+#Aggregate Loggerdata per individual
+t<-table(Loggerdata$ID, Loggerdata$night_logger)
+log<-t>0
+
+#  Make "group-by-individual matrix" (gbi), where lognight-logger is considered the grouping variable. All individuals present in each spatio-temporal combination are considered part of the same "group". The more two individuals are observed in the same "group" the more socially associated they are.
+gbi<- replace(t, log, 1)
+gbi<-t(gbi) # Here individuals as columns and groups (nights_logger combinations) as rows 
+
+#derive social association matrix using the default Simple Ratio Index method of asnipe package 
+AM<-get_network(gbi, association_index="SRI")
+
+#Note that Association matrix has rownames and colnames in a different order from key
+all(rownames(AM)==key$ID)
+# We need to re-order the matrix to be in the same order with the other matrices
+
+AM<-AM[match(key$ID,rownames(AM)), match(key$ID,colnames(AM))]
+
+#Now Association matrix has rownames and colnames in same order as key
+all(rownames(AM)==key$ID)
+
+#Save matrix to ready matrices folder
+saveRDS(AM,"ready_matrices/AM.rds")
+
+```
+Fun EXTRA: plotting social network with igraph package
+```{r}
+library(igraph)
+#Create an adjacency matrix
+net<- graph.adjacency(AM, mode= 'undirected', weighted=TRUE, diag=FALSE)
+
+#metadata for the plot
+demo<-sample_data[,c("ID","Sex")]
+demo<-unique(demo)
+demo<-demo[match(rownames(AM),demo$ID),]
+demo$weighted_degree<- strength(net, vids=V(net))
+
+sexes<-unique(demo$Sex)
+sexes.numeric<- as.numeric(demo$Sex)
+demo$sexcolor<-rainbow(length(sexes))[sexes.numeric]
+demo$sexcolor<-as.factor(demo$sexcolor)
+levels(demo$sexcolor)<-c("red","blue")
+demo$sexcolor<-as.character(demo$sexcolor)
+
+plot(net, vertex.color=demo$sexcolor, vertex.label=NA,vertex.frame.color = demo$sexcolor, vertex.size=demo$weighted_degree^0.8,  edge.color="black",edge.width= E(net)$weight*5, edge.curved=0.4)
+```
+4. Making binary similarity matrices (here, age similarity), based on individual info stored in sample_data. The resulting matrix will have for each individual pair a value of "1"= same age or "0"=different age
+```{r}
+
+#Create data frame with each Individual name (character) and their Age (Character)
+Age_frame<-sample_data[,c("ID","Age")]
+Age_frame$ID<-as.character(Age_frame$ID)
+Age_frame$Age<-as.character(Age_frame$Age)
+
+#Create an empty numeric matrix to fill with distances
+AGEM<-array(0,c(nrow(Age_frame),nrow(Age_frame)))
+
+#Derive matrix with binary Age similarity between each sample
+for(i in 1:nrow(Age_frame)){
+  for(j in 1:nrow(Age_frame)){ 
+    if(Age_frame$Age[i]==Age_frame$Age[j]){
+      AGEM[i,j]= 1
+    } else{
+      AGEM[i,j]= 0
+    }
+  }
+} 
+
+#Note that AGE similarity matrix has rownames and colnames in the same order as key
+all(rownames(AGEM)==key$ID)
+rownames(AGEM)<-key$ID
+colnames(AGEM)<-key$ID
+
+#Save matrix to ready matrices folder
+saveRDS(AGEM,"ready_matrices/AGEM.rds")
+```
+5. Making combination-factor matrices (here, sex combination of a pair), based on individual info stored in sample_data. The resulting matrix will have for each individual pair a value of "FF"= both female or "FM"=male and a female "MM"=both male.
+
+This type of variables are better than binary variables in revealing how some trends may be affected by individual-level factors.
+```{r}
+
+#Create data frame with each Individual name (character) and their Age (Character)
+Sex_frame<-sample_data[,c("ID","Sex")]
+Sex_frame$ID<-as.character(Sex_frame$ID)
+Sex_frame$Sex<-as.character(Sex_frame$Sex)
+
+#Create an empty character matrix to fill with characters
+SEXM<-array(as.character(NA),c(nrow(Sex_frame),nrow(Sex_frame)))
+
+for(i in 1:nrow(Sex_frame)){
+  for(j in 1:nrow(Sex_frame)){ 
+    if(Sex_frame$Sex[i]=="F" & Sex_frame$Sex[i]==Sex_frame$Sex[j]){
+     SEXM[i,j]= "FF"}
+    if(Sex_frame$Sex[i]=="M" & Sex_frame$Sex[i]==Sex_frame$Sex[j]){
+     SEXM[i,j]= "MM"}
+    if( Sex_frame$Sex[i]!=Sex_frame$Sex[j]){
+     SEXM[i,j]= "FM"}
+    }
+    }
+
+rownames(SEXM)<-key$ID
+colnames(SEXM)<-key$ID
+
+#Save matrix to ready matrices folder
+saveRDS(SEXM,"ready_matrices/SEXM.rds")
+```
+These matrices can be used as such in matrix models like MRQAP 
+
+...or they can be "unraveled" into a long dyadic data frame, where each row depicts one dyad and columns mark the various calculated similarities and distances between members of this pair. Note that for the sake of constructing a multimembership random effect in dyadic glms later, we also need to add columns informing us about the identity of individual A and B in each dyad.
+
+Let's first unravel the existing matrices into one dyadic data frame:
+
+```{r}
+#Read in the matrices if not in already:
+JACM<-readRDS("ready_matrices/JACM.rds")
+TEMPM<-readRDS("ready_matrices/TEMPM.rds")
+SPATM<-readRDS("ready_matrices/SPATM.rds")
+AM<-readRDS("ready_matrices/AM.rds")
+SEXM<-readRDS("ready_matrices/SEXM.rds")
+
+#First unravel the matrices into vectors matching the lower quantile of each matrix. 
+
+#From numeric matrices, this can be done by making a list (c()) of the distance object (dist()) derived from the matrix. as.dist() by default includes only the lower quantile of the matrix and excludes the diagonal.
+#From categorical matrices, this can be done by making a list (c()) of the lower quantile of the matrix with lower.tri() -function.
+
+jac<-c(as.dist(JACM))
+am<-c(as.dist(AM))
+spa<-c(as.dist(SPATM))
+temp<-c(as.dist(TEMPM))
+age<-c(as.dist(AGEM))
+sex<-c(SEXM[lower.tri(SEXM)])
+
+#Combine these vectors into a data frame
+data.dyad<-data.frame(Social_proximity=am,Microbiome_similarity=jac,spatial_distance=spa,Temporal_distance=temp,age_similarity=age,sex_combination=sex) 
+
+#Now all we need to do is add the identities of both individuals in each dyad as separate columns into the data frame and exclude self-comparisons (as these are not meaningful). 
+
+# extracting Individual-combinations present in the matrices
+list<-expand.grid(key$ID,key$ID) 
+# This created individual-to-same-individual pairs as well. Get rid of these:
+list<-list[which(list$Var1!=list$Var2),] 
+# this still has both quantiles in--> add 'unique' key 
+list$key <- apply(list, 1, function(x)paste(sort(x), collapse='')) 
+list<-subset(list, !duplicated(list$key)) 
+# sanity check that the Individual name combinations are in the same exact order as the lower quantile value vector of the matrices
+i=73
+JACM[which(rownames(JACM)==list$Var1[i]),which(colnames(JACM)==list$Var2[i])]==jac[i]
+
+# add the names of both individuals participating in each dyad into the data frame
+data.dyad$IDA<-list$Var2
+data.dyad$IDB<-list$Var1
+
+# Make sure you have got rid of all self comparisons
+data.dyad<-data.dyad[which(data.dyad$IDA!=data.dyad$IDB),] 
+```
+```{r}
