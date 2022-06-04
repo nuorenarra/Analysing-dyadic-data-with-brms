@@ -8,13 +8,15 @@ In biology and social sciences, many measures/variables of interest are inherent
  
 To construct a multivariate model predicting dyadic (pairwise) values with other pairwise values you can take for example two routes: Null-model approach (matrix permutation models) or dyadic glm with multimembership random effect structure. The former is using the dependence structure of the data itself as a null model so you won't need to know much about it, just see whether the correlation between two matrices is more extreme than the distribution of correlation coefficients of the same two matrices when the other one is randomized multiple times and correlation re-calculated each time. The second one is a generalized linear mixed model approach, that aims at accounting for the specific type of dependence introduced by pairwise comparisons with multimembership random effect structure. This approach is  more flexible in that it can accommodate a variety of different response variable types (proportions, counts etc...) with different distributions (skewed, normal), and it can deal with interaction effects and repeated measurements of same individual (nested/hierarchical autocorrelation) alongside the dyadic dependence of the values (multimembership autocorrelation). 
 
-This tutorial focuses on the latter case, introducing modeling pairwise data using a Bayesian multimembership glm framework using the Bayesian regression R package brms (Buerkner 2017). As and example, we will use a real data set on wild mouse microbiome with known correlation patterns among dyadic variables (See Raulo et al., 2021). We will explore two research questions:
-"Does social association strength ("social transmission link") and spatial overlap ("environmental transmission link") predict gut microbiome similarity between pairs of wild mice?" and
-"If so, which bacteria transmit among mice through social contact and which through shared environment?"
+This tutorial focuses on the latter case, introducing modeling pairwise data using a Bayesian multimembership glm framework using the Bayesian regression R package brms (Buerkner 2017). As and example, we will use a real data set on wild mouse microbiome with known correlation patterns among dyadic variables (See Raulo et al., 2021). We will explore a research question:
+"Does social association strength ("social transmission link") and spatial overlap ("environmental transmission link") predict gut microbiome similarity between pairs of wild mice?" 
 
-The three codes walk you through the steps of 
+
+The codes walk you through the steps of 
 (1) making pairwise dataframes, 
 (2) building dyadic models in brms, (here, predicting overall microbiome similarity with social associations and spatial overlap among pairs of mice)  
+
+Coming soon:
 (3) building a post hoc drop-model to deconstruct the whole-microbiome-level transmission effects into the level of microbial taxa (genera) to test which bacteria seem to be transmitted through space and which through social association
 
 
