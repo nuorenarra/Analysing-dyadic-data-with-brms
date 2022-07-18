@@ -5,11 +5,11 @@ output: html_notebook
 
 When we have constructed a dyadic regression model predicting microbiome similarity with different pairwise effects, we can use a dropmodel-approach to deconstruct these whole-microbiome-level trends into the level of individual bacterial taxa. This allows us to perform a sort of dyadic indicator analysis, and ask post hoc questions such as which microbes are driving specific microbiome-similarity effects. It allows us to decompress the overall microbiome variation explained by various predictors into its components: Variation in the sharing of which bacterial taxa is explained by which predictor the most. 
 
-Here we decompress the signals of different transmission effects on overall microbiome sharing into the level of distinct microbial taxa (genera) by asking "If social association (social transmission effect) and spatial overlap (environmental transmission effect) among pairs of mice independently predict their overall level of microbiome sharing (Jaccard microbiome similarity = proportion of taxa shared), then which bacteria are responsible for the social vs environmental transmission effect? In other words, when there is evidence for higher microbiome similarity among more socially AND spatially close mouse-pairs, which bacterial taxa are transmitted socially and which environmentally? 
+Here we decompress the signals of different transmission effects on overall microbiome sharing into the level of distinct microbial taxa (genera) by asking "If social association (social transmission effect) and spatial overlap (environmental transmission effect) among pairs of mice independently predict their overall level of microbiome sharing (Jaccard microbiome similarity = proportion of taxa shared), then which bacteria are responsible for the social vs environmental transmission effect? In other words, when there is evidence for higher microbiome similarity among more socially AND spatially close mouse-pairs, is this due to sharing of the same or different subset of the microbiome, i.e. which bacterial taxa are transmitted socially and which environmentally? 
 
-Note: In this example data set the spatial signal on microbiome similarity is actually not significant (credible intrvals overlap zero), but we will use both social and spatial effects as an example of whole-microbiome-level effect-deconstruction, since we know that in a larger data set (of which this is a subset) both effects are significant drivers of microbiome similarity (See Raulo et al., 2021).
+Note: In this example data set the spatial signal on microbiome similarity is actually not significant (credible intervals overlap zero), but we will use both social and spatial effects as an example of whole-microbiome-level effect-deconstruction, since we know that in a larger data set (of which this is a subset) both effects are significant drivers of microbiome similarity (See Raulo et al., 2021).
 
-This modeling framework relies on measuring each microbial taxon's importance in each whole-microbiome-level trend. The whole-microbiome-level transmission signals are deconstructed to taxon-level by evaluating the extent to which dropping each taxon from the data increases the uncertainty around social/spatial transmission effect. This can be viewed as a score of importance that captures each taxon’s influence on the detectability of a given overall transmission signal. 
+This modeling framework relies on measuring each microbial taxon's importance in each whole-microbiome-level trend. The whole-microbiome-level transmission signals are deconstructed to taxon-level by evaluating the extent to which dropping each taxon from the data increases the uncertainty around social/spatial transmission effect. This can be viewed as a score of importance that captures each taxon’s influence over the detectability of a given overall transmission signal. 
 
 Finally, by calculating each taxon’s relative importance for social vs. environmental (spatial) transmission signal, we can estimate their reliance on a given transmission mode over the other. 
 
@@ -195,32 +195,34 @@ Here, the importance I(G) of microbial genus G on dyadic effect E (social of spa
 
 CIbr_increase(E_G)= CIbr(E_dropG)-CIbr(E_baseline),
 If CIbr_increase(E_G)<0, CIbr_increase(E_G)=0,
-I(G_E)= CIbr_increase(E_G)/sqrt(no_ASVs),
+I(G_E)= (CIbr_increase(E_G)/CIbr(E_baseline))/sqrt(no_ASVs),
 
 where CIbr(E_baseline) is the breadth of credible intervals around effect E in the baseline model (with nothing dropped),
-CIbr(E_dropG) is the breadth of credible intervals around effect E in the model where genus G is dropped,
-CIbr_increase(E_G) is thus the amount of added uncertainty, that dropping genus G from the response variable will introduce around effect E. When credible interval breadth does not increase, (CIbr_increase(E_G)<0), we will set this to zero (CIbr_increase(E_G)=0),
-I(G_E) is the importance genus G has on effect E, calculated as the increase in credible interval breadth (CIbr_increase) divided by the square root of the number of unique sequence vatiants that were dropped as part of that genus, multiplied by 100 to increase the scale. In other words it describes how much uncertainty is introduced around an effect per unit data lost. 
 
+CIbr(E_dropG) is the breadth of credible intervals around effect E in the model where genus G is dropped,
+
+CIbr_increase(E_G) is thus the amount of added uncertainty, that dropping genus G from the response variable will introduce around effect E. When credible interval breadth does not increase but in fact decreases after a drop (CIbr_increase(E_G)<0), we consider this genus to have no importnace over given effect, and thus we will set this to zero (CIbr_increase(E_G)=0).
+
+I(G_E) is the importance genus G has on effect E, calculated as the increase in credible interval breadth (CIbr_increase) relative to the original credible interval breadth CIbr(E_baseline), divided by the square root of the number of unique sequence variants that were dropped as part of that genus, and multiplied by 100 to increase the scale. In other words it describes how much uncertainty is introduced around an effect per unit data lost. 
 ```{r}
 
 #For each microbial genera, calculate their importance on social association effect on microbiome
-
+Social_CIbr_baseline<-dropResults[which(dropResults$Genus=="none"),]$Social_CIbr
 dropResults$Social_CIbr<-abs(dropResults$Social_uCI-dropResults$Social_lCI)
-dropResults$Social_CIbr_increase<-dropResults$Social_CIbr-dropResults[which(dropResults$Genus=="none"),]$Social_CIbr
+dropResults$Social_CIbr_increase<-dropResults$Social_CIbr-Social_CIbr_baseline
 #Only those genera whose drop increases the uncertainty around an effect will be considered important for that effect:
 dropResults[which(dropResults$Social_CIbr_increase<0),]$Social_CIbr_increase<-0
 #Importance value is this increase in uncertainty divided by the square root of how many ASVs were dropped, and multiplied by 100 to increase the scale.
-dropResults$IMPORTANCE_SOCIAL<-dropResults$Social_CIbr_increase/sqrt(dropResults$ASVs_dropped)*100
+dropResults$IMPORTANCE_SOCIAL<-(dropResults$Social_CIbr_increase/Social_CIbr_baseline)/sqrt(dropResults$ASVs_dropped)*100
 
 #For each microbial genera, calculate their importance on spatial distance effect on microbiome
-
+Spatial_CIbr_baseline<-dropResults[which(dropResults$Genus=="none"),]$Spatial_CIbr
 dropResults$Spatial_CIbr<-abs(dropResults$Spatial_uCI-dropResults$Spatial_lCI)
-dropResults$Spatial_CIbr_increase<-dropResults$Spatial_CIbr-dropResults[which(dropResults$Genus=="none"),]$Spatial_CIbr
+dropResults$Spatial_CIbr_increase<-dropResults$Spatial_CIbr-Spatial_CIbr_baseline
 #Only those genera whose drop increases the uncertainty around an effect will be considered important for that effect:
 dropResults[which(dropResults$Spatial_CIbr_increase<0),]$Spatial_CIbr_increase<-0
 #Importance value is this increase in uncertainty divided by the square root of how many ASVs were dropped, and multiplied by 100 to increase the scale.
-dropResults$IMPORTANCE_SPATIAL<-dropResults$Spatial_CIbr_increase/sqrt(dropResults$ASVs_dropped)*100
+dropResults$IMPORTANCE_SPATIAL<-(dropResults$Spatial_CIbr_increase/Spatial_CIbr_baseline)/sqrt(dropResults$ASVs_dropped)*100
 
 ```
 Now, microbes can have high importance for social, spatial, neither or both signals. To get a measure of which of the two transmission pathways each genus may rely on more, we will calculate a "reliance score" for microbial genus, defined as:
