@@ -52,7 +52,7 @@ sample_data<-readRDS("sample_data_from_phyloseq.rds")
 key<-data.frame(ID=sample_data(micdata)$ID, Sample_name=sample_data(micdata)$Sample_name)
 
 #Make Jaccard dissimilarity matrix from microbiome data using vegdist function embedded in phyloseq::distance
-JACM<- as.matrix(phyloseq::distance(micdata, method = "jaccard", type = "samples"))
+JACM<- as.matrix(phyloseq::distance(micdata, method = "jaccard", type = "samples", binary=T))
 #Transpose Jaccard dissimilarity marix to Jaccard similarity matrix
 JACM<-1-JACM
 
