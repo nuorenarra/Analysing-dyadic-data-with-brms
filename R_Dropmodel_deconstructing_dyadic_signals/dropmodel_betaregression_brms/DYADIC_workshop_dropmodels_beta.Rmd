@@ -1,0 +1,268 @@
+---
+title: "CONSTRUCTING DYADIC POSTHOC DROP-MODELS - Aura Raulo 2022"
+output: html_notebook
+---
+
+When we have constructed a dyadic regression model predicting microbiome similarity with different pairwise effects, we can use a dropmodel-approach to deconstruct these whole-microbiome-level trends into the level of individual bacterial taxa. This allows us to perform a sort of dyadic indicator analysis, and ask post hoc questions such as which microbes are driving specific microbiome-similarity effects. It allows us to decompress the overall microbiome variation explained by various predictors into its components: Variation in the sharing of which bacterial taxa is explained by which predictor the most. 
+
+Here we decompress the signals of different transmission effects on overall microbiome sharing into the level of distinct microbial taxa (genera) by asking "If social association (social transmission effect) and spatial overlap (environmental transmission effect) among pairs of mice independently predict their overall level of microbiome sharing (Jaccard microbiome similarity = proportion of taxa shared), then which bacteria are responsible for the social vs environmental transmission effect? In other words, when there is evidence for higher microbiome similarity among more socially AND spatially close mouse-pairs, is this due to sharing of the same or different subset of the microbiome, i.e. which bacterial taxa are transmitted socially and which environmentally? 
+
+Note: In this example data set the spatial signal on microbiome similarity is actually not significant (credible intervals overlap zero), but we will use both social and spatial effects as an example of whole-microbiome-level effect-deconstruction, since we know that in a larger data set (of which this is a subset) both effects are significant drivers of microbiome similarity (See Raulo et al., 2021).
+
+This modeling framework relies on measuring each microbial taxon's importance in each whole-microbiome-level trend. The whole-microbiome-level transmission signals are deconstructed to taxon-level by evaluating the extent to which dropping each taxon from the data increases the uncertainty around social/spatial transmission effect. This can be viewed as a score of importance that captures each taxon’s influence over the detectability of a given overall transmission signal.
+
+Finally, by calculating each taxon’s relative importance for social vs. environmental (spatial) transmission signal, we can estimate their reliance on a given transmission mode over the other. 
+
+We will start by making a loop that derives the dyadic data table over and over again, making different versions of Jaccard microbiome similarity, each time dropping one microbial genus from the data. We will start by dropping genus "none" to get the baseline effects to which we can compare the posterior distributions of the transmission effects after each drop.
+
+This code uses  betaregression in brms package as the dyadic model inside the loop. This is the optimal modeling family function, as our response variable (Jaccard) values are proportions. However, approximately similar estimation can be achieved with gaussian regression using MCMCglmm package, with much increased modeling speed. A code for this faster method can be found from the sister directory of this code. However, one should take care to make sure using gaussian regression is roughly applicable with your data. Mainly, note that gaussian regression can be a useful approximation of betaregression if the proportional response variable has value distribution that is not very skewed and has tails not extending very near the boundaries of their range (0 and 1).
+
+Depending on the data, one needs to also decide whether the best betaregression model to use here is
+1) normal betaregression (when no 0s and 1s ever exist in the response data)
+  --> i.e., no pairs of individuals share nothing or everything
+  --> note that this needs to be true after each taxon drop as well
+2) zeroinflated betaregression (when 0s or 1s exist , but not both, and these values are likely to be overtly informative )
+  --> this is the case for example if there are a notable amount of pairs that do not share a single taxon 
+3) zero-one-inflated betaregression (when both zeros and 1s exist and likely to be overtly informative)
+  --> this is the case for example if there are a notable amount of pairs that do not share a single taxon or        share all of their taxa
+  --> this is common in data sets with few taxa in general
+4) normal betaregression with values rescaled <1 and >0 (when 0 and/or 1s exist in the data but are not likely to be more informative than the other values)
+  --> this is the case for example if there are a negligible amount of pairs that do not share a single taxon        or share all of their taxa. Or if we assume that 0s or 1s do not carry more in formation than 0.9999 or 0.0001
+  
+Here, we will use case 4 as a kind of precautionary measure, because there are no 0s or 1s in the full data and thus we expect that if dropping any genus would induce 0 or 1 values in the response data, these would be relatively rare and not overtly informative.
+
+The scaling transformation we use here is:  (y * (n−1) + 0.5) / n where n is the sample size.
+Ref: -from betareg documentation, cited by https://stats.stackexchange.com/questions/48028/beta-regression-of-proportion-data-including-1-and-0
+
+Alternatively, one could scale the values between 0.9999 and 0.0001 with the same "range.use" function that is used to scale predictors below. 
+
+1. Prepare data
+```{r}
+library(phyloseq)
+library(MCMCglmm)
+
+#Read in microbiome data and associated sample data in phyloseq format. These data sets contain either 70 samples of 70 individuals
+micdata<-readRDS( "Mouse_microbiome_idwise.rds")
+#make a key for the order of sample names and their associated individual IDs.
+key<-data.frame(ID=sample_data(micdata)$ID, Sample_name=sample_data(micdata)$Sample_name)
+#Read in dyadic data frame
+data.dyad_REAL<-readRDS("dyadic_model_data.rds")
+
+# Data wrangling step: Give all unclassified genera a name based on their family or order
+tax<-as.data.frame(tax_table(micdata))
+tax[which(tax$Genus=="g__"),]$Genus<-paste0("Unknown_genus_in_",tax[which(tax$Genus=="g__"),]$Family)
+tax[which(is.na(tax$Genus)),]$Genus<-paste0("Unknown_genus_in_",tax[which(is.na(tax$Genus)),]$Family)
+tax[which(tax$Genus=="Unknown_genus_in_f__"),]$Genus<-paste0("Unknown_genus_in_",tax[which(tax$Genus=="Unknown_genus_in_f__"),]$Order)
+
+#Make a list of the bacterial genera present in the data and how many unique taxa (ASVs) each genus has
+tax_G<-as.data.frame(table(tax[,6]))
+genuses<-tax_G$Var1
+genuses<-c("none",genuses)
+
+```
+
+Drop-model loop
+Recommended to run across 10-40 cores
+One MCMCglmm model took 6 hours on macbook pro 2022
+
+```{r}
+
+#Estimate run time
+dropnumber<-length(genuses)#324 genera 
+model_minutes<-60*6
+cores<-40
+runtime<-(dropnumber*model_minutes)/cores
+runtime_hours<-runtime/60
+
+paste("across", cores, "cores,", "brms-dropmodel loop with" ,dropnumber,"genuses will take approx." ,as.character(runtime_hours),"hours to run")
+
+#Parallelize dropmodels across cores
+library(parallel)
+library(doParallel)
+
+  #start cluster
+dropRes_list<-list()
+cl <- parallel::makeCluster(40, type="FORK") 
+
+doParallel::registerDoParallel(cl)
+
+  dropRes_list<-foreach(i = 1:length(genuses)) %dopar% { 
+    library(phyloseq)
+    #choose the genus to drop and prune the taxa to keep everything else
+    gen.i<-genuses[i]
+    taxa_tokeep<-rownames(tax[which(tax$Genus!=genuses[i]),])
+    mic.i<-prune_taxa(taxa_tokeep, micdata)
+    #Calculate Jaccard and Bray-Curtis microbiome dissimilarity for each mouse pair
+    JACM.i<- as.matrix(phyloseq::distance(mic.i, method="jaccard", binary=T))
+    BRAY.i<- as.matrix(phyloseq::distance(mic.i, method="bray"))
+    #Unravel dissimilarity matrices into vectors
+    bray<-c(as.dist(BRAY.i))
+    jac<-c(as.dist(JACM.i))
+    
+    #Make a new dyadic data frame from these vectors and order it to be in the same order as the original dyadic data frame
+    data.dyad.i<-data.frame(Jaccard=jac,BrayCurtis=bray)
+    # extracting Sample_name-combinations of the matrix
+    list<-expand.grid(key$Sample_name,key$Sample_name) 
+    # This created sample-to-same-sample pairs as well. Get rid of these:
+    list<-list[which(list$Var1!=list$Var2),] 
+    # the resulting list still has both quantiles of the original matrix (i.e. all values are doubled) in--> add 'unique' key and subset to one quantile only
+    list$key <- apply(list, 1, function(x)paste(sort(x), collapse='')) 
+    list<-subset(list, !duplicated(list$key)) 
+    # Sample_name combinations are now in the same order as the lower quantile value vector
+    # So we can add dyad name and each participant ID to dyadic dataframe
+    data.dyad.i$Sample_A<-list$Var2
+    data.dyad.i$Sample_B<-list$Var1
+  
+    # extracting combinations of individual IDs for each pair
+    keyA<-key[,c("ID","Sample_name")]
+    colnames(keyA)<-c("IDA","Sample_A")
+    keyB<-key[,c("ID","Sample_name")]
+    colnames(keyB)<-c("IDB","Sample_B")
+  
+    keyA<-keyA[match(data.dyad.i$Sample_A,keyA$Sample_A),]
+    keyB<-keyB[match(data.dyad.i$Sample_B,keyB$Sample_B),]
+  
+    data.dyad.i$IDA<-keyA$IDA
+    data.dyad.i$IDB<-keyB$IDB
+  
+    # Make sure we have no self comparisons in the data (This is the case by default here, since we are using just one sample per individual)
+    
+    data.dyad.i<-data.dyad.i[which(data.dyad.i$IDA!=data.dyad.i$IDB),] #2415
+  
+    ### Combine new Jaccard variable with rest of dyadic data columns
+    data.dyad<-data.dyad_REAL
+    data.dyad$Jaccard<-data.dyad.i$Jaccard
+    
+    #factorize terms used for multimembership random structure and make sure levels are same and in same order
+    data.dyad$IDA<-as.factor(data.dyad$IDA)
+    data.dyad$IDB<-as.factor(data.dyad$IDB)
+    all(levels(data.dyad$IDA)==levels(data.dyad$IDB))#T
+
+  # Scale all predictors (if not between 0-1 already) to be between 0-1
+    scalecols<-c("Temporal_distance" ,"spatial_distance")
+    
+    range.use <- function(x,min.use,max.use){ (x -   
+    min(x,na.rm=T))/(max(x,na.rm=T)-min(x,na.rm=T)) * (max.use - min.use) + min.use }
+  
+    for(i in 1:ncol(data.dyad[,which(colnames(data.dyad)%in%scalecols)])){
+      data.dyad[,which(colnames(data.dyad)%in%scalecols)][,i]<-range.use(data.dyad[,which(colnames(data.dyad)%in%scalecols)][,i],0,1)
+    }
+    
+    #Transpose Jaccard dissimilarity to similarity
+    data.dyad$Jaccard<-1-data.dyad$Jaccard
+    
+    #Scale Jaccard values to be sure that there are no 0s and 1s.
+    
+    samplesize=nrow(data.dyad)
+    data.dyad$Jaccard<-(data.dyad$Jaccard*(samplesize-1)+0.5)/samplesize
+  
+    #The brms betaregression model
+    
+    library(brms)
+
+    dropmodel <- brm(Microbiome_similarity~1+age_similarity+ sex_combination+ spatial_distance+Temporal_distance+Social_proximity
+                 + (1|mm(IDA,IDB)),
+                 data = data.dyad,
+                 family= "Beta",
+                 control=list(adapt_delta=0.80,
+                              max_treedepth=12),
+                 warmup = 1000, iter = 3000,
+                 cores = 1,
+                 chains = 1,
+                 save_pars = save_pars(group = FALSE),
+                 init=0,
+                # file = paste0("models2/dropmodel_", i) #This can be useful if we have space to save each dropmodel onto the                   cluster so we dont lose models if the loop does not complete for some reason. 
+                 )
+
+
+    ASVs_dropped.i<-nrow(tax_table(mic))-nrow(tax_table(mic.i))
+    fixed_summary<-summary(dropmodel)$fixed
+    resdf.i<-data.frame(Genus_dropped=gen.i,
+                      ASVs_dropped=ASVs_dropped.i,
+                      Social_Estimate=fixed_summary[which(rownames(fixed_summary)=="Social_proximity"),]$Estimate,
+                      Social_lCI=fixed_summary[which(rownames(fixed_summary)=="Social_proximity"),]$`l-95% CI`,
+                      Social_uCI=fixed_summary[which(rownames(fixed_summary)=="Social_proximity"),]$`u-95% CI`,
+                      Spatial_Estimate=fixed_summary[which(rownames(fixed_summary)=="spatial_distance"),]$Estimate,
+                      Spatia_lCI=fixed_summary[which(rownames(fixed_summary)=="spatial_distance"),]$`l-95% CI`,
+                      Spatial_uCI=fixed_summary[which(rownames(fixed_summary)=="spatial_distance"),]$`u-95% CI`,
+                      )
+    
+  rm(dropmodel)
+    return(resdf.i)
+  }
+parallel::stopCluster(cl) 
+
+saveRDS(dropRes_list,"dropRes_list.rds")
+
+##rbind the resulting data frames to single master data frame
+        dropResults<-data.frame(Genus_dropped=NA,
+                                            ASVs_dropped=NA,
+                                            Social_Estimate=NA,
+                                            Social_lCI=NA,
+                                            Social_uCI=NA,
+                                            Spatial_Estimate=NA,
+                                            Spatial_lCI=NA,
+                                            Spatial_uCI=NA,
+                                            habitat_Estimate=NA,
+                                            habitat_lCI=NA,
+                                            habitat_uCI=NA)
+
+  for(j in 1:length(genuses)){
+    dropResults<-rbind(dropResults,dropRes_list[[j]])
+  }
+dropResults<-dropResults[2:nrow(dropResults),]
+
+dropResults$Genus_dropped2<-genuses
+
+saveRDS(dropResults,"dropResults_genus.rds")
+
+```
+Calculate importance score for each bacterial genus over each transmission effect (Social association or spatial distance effect on microbiome sharing)
+
+Here, the importance I(G) of microbial genus G on dyadic effect E (social of spatial effect on whole microbiome sharing) is defined as follows:
+
+CIbr_increase(E_G)= CIbr(E_dropG)-CIbr(E_baseline),
+I(G_E)= (CIbr_increase(E_G)/CIbr(E_baseline))/sqrt(no_ASVs),
+
+where CIbr(E_baseline) is the breadth of credible intervals around effect E in the baseline model (with nothing dropped),
+
+CIbr(E_dropG) is the breadth of credible intervals around effect E in the model where genus G is dropped,
+
+CIbr_increase(E_G) is thus the amount of added uncertainty, that dropping genus G from the response variable will introduce around effect E. 
+
+I(G_E) is the importance genus G has on effect E, calculated as the increase in credible interval breadth (CIbr_increase) relative to the original credible interval breadth CIbr(E_baseline), divided by the square root of the number of unique sequence variants that were dropped as part of that genus, and multiplied by 100 to increase the scale. In other words it describes how much uncertainty is introduced around an effect per unit data lost. 
+```{r}
+
+#For each microbial genera, calculate their importance on social association effect on microbiome
+Social_CIbr_baseline<-dropResults[which(dropResults$Genus=="none"),]$Social_CIbr
+dropResults$Social_CIbr<-abs(dropResults$Social_uCI-dropResults$Social_lCI)
+dropResults$Social_CIbr_increase<-dropResults$Social_CIbr-Social_CIbr_baseline
+
+#Importance value is this increase in uncertainty divided by the square root of how many ASVs were dropped, and multiplied by 100 to increase the scale.
+dropResults$IMPORTANCE_SOCIAL<-(dropResults$Social_CIbr_increase/Social_CIbr_baseline)/sqrt(dropResults$ASVs_dropped)*100
+
+#For each microbial genera, calculate their importance on spatial distance effect on microbiome
+Spatial_CIbr_baseline<-dropResults[which(dropResults$Genus=="none"),]$Spatial_CIbr
+dropResults$Spatial_CIbr<-abs(dropResults$Spatial_uCI-dropResults$Spatial_lCI)
+dropResults$Spatial_CIbr_increase<-dropResults$Spatial_CIbr-Spatial_CIbr_baseline
+
+#Importance value is this increase in uncertainty divided by the square root of how many ASVs were dropped, and multiplied by 100 to increase the scale.
+dropResults$IMPORTANCE_SPATIAL<-(dropResults$Spatial_CIbr_increase/Spatial_CIbr_baseline)/sqrt(dropResults$ASVs_dropped)*100
+
+```
+Now, microbes can have high importance for social, spatial, neither or both signals. To get a measure of which of the two transmission pathways each genus may rely on more, we will calculate a "reliance score" for microbial genus, defined as:
+
+R(G_E1)= I(G_E1)*I(G_E1)/I(G_E2),
+
+where R(G_E1) is the reliance of genus G on effect E1 (i.e. social transmission), calculated as the importance of genus G on effect E1 (I(G_E1)) weighted by the ratio of I(G_E1) and I(G_E2), i.e a measure of how much more importance they have for this effect E1 compared to the other effect E2.
+
+
+```{r}
+#For each microbial genera, calculate their reliance on social association effect over spatial effect on microbiome
+
+dropResults$RELIANCE_SOCIAL<-dropResults$IMPORTANCE_SOCIAL*(dropResults$IMPORTANCE_SOCIAL/dropResults$IMPORTANCE_SPATIAL)
+
+#For each microbial genera, calculate their reliance on spatial effect over social effect on microbiome
+
+dropResults$RELIANCE_SPATIAL<-dropResults$IMPORTANCE_SPATIAL*(dropResults$IMPORTANCE_SPATIAL/dropResults$IMPORTANCE_SOCIAL)
+```
