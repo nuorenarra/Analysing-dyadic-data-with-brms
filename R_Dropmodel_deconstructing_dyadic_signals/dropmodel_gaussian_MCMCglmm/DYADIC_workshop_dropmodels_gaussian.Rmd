@@ -88,7 +88,7 @@ doParallel::registerDoParallel(cl)
     taxa_tokeep<-rownames(tax[which(tax$Genus!=genuses[i]),])
     mic.i<-prune_taxa(taxa_tokeep, micdata)
     #Calculate Jaccard and Bray-Curtis microbiome dissimilarity for each mouse pair
-    JACM.i<- as.matrix(phyloseq::distance(mic.i, method="jaccard"))
+    JACM.i<- as.matrix(phyloseq::distance(mic.i, method="jaccard", binary=T))
     BRAY.i<- as.matrix(phyloseq::distance(mic.i, method="bray"))
     #Unravel dissimilarity matrices into vectors
     bray<-c(as.dist(BRAY.i))
