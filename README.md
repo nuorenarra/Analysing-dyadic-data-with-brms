@@ -16,8 +16,6 @@ This tutorial focuses on the latter case, introducing modeling pairwise data usi
 The codes walk you through the steps of 
 (1) making pairwise dataframes, 
 (2) building dyadic models in brms, (here, predicting overall microbiome similarity with social associations and spatial overlap among pairs of mice)  
-
-Coming soon:
 (3) building a post hoc drop-model to deconstruct the whole-microbiome-level transmission effects into the level of microbial taxa (genera) to test which bacteria seem to be transmitted through space and which through social association
 
 
