@@ -1,7 +1,7 @@
 
 **README**
 
-# Deconstructing dyadic signal using a drop-model 
+# Deconstructing dyadic signals using a drop-model 
 
 ## Overview
 
