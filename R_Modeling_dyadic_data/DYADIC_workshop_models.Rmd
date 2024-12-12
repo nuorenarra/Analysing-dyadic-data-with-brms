@@ -108,7 +108,7 @@ summary(model1)
 
 #interaction model
 model2<-brm(Microbiome_similarity~1+age_similarity+ spatial_distance+Temporal_distance+sex_combination*Social_proximity 
-                + (1|ID) 
+                + (1|mm(IDA,IDB)) 
               data = data.dyad, 
               family= "Beta",
               warmup = 1000, iter = 3000, 
